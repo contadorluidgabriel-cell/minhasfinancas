@@ -23,7 +23,7 @@
     <div style={{width:"100%",maxWidth:430,background:THEME.panel,border:`1px solid ${THEME.border}`,borderRadius:22,padding:24,boxShadow:"0 28px 80px rgba(0,0,0,.35)"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:22}}><AppLogo/><div><div style={{fontSize:16,fontWeight:950}}>Financeiro Pessoal</div><div style={{fontSize:10,color:THEME.subtle,marginTop:2}}>V7.3 • sincronizado com o Supabase do Planner</div></div></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,padding:4,background:THEME.card,borderRadius:12,border:`1px solid ${THEME.border}`,marginBottom:18}}>
-        {[["login","Entrar"],["signup","Criar conta"]].map(([key,label])=><button key={key} type="button" onClick={()=>{setMode(key);setError("");setMessage("")}} style={{border:0,borderRadius:9,padding:"9px 10px",background:mode===key?THEME.accent:"transparent",color:mode===key?"white":THEME.muted,fontWeight:850,cursor:"pointer"}}>{label}</button>)}
+        {[['login','Entrar'],['signup','Criar conta']].map(([key,label])=><button key={key} type="button" onClick={()=>{setMode(key);setError("");setMessage("")}} style={{border:0,borderRadius:9,padding:"9px 10px",background:mode===key?THEME.accent:"transparent",color:mode===key?"white":THEME.muted,fontWeight:850,cursor:"pointer"}}>{label}</button>)}
       </div>
       <form onSubmit={submit} style={{display:"grid",gap:12}}>
         <Field label="E-mail"><Input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="seu@email.com" autoComplete="email" required/></Field>
