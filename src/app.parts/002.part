@@ -1,0 +1,177 @@
+  const [mode,setMode]=useState("login");
+  const [email,setEmail]=useState("");
+  const [password,setPassword]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [message,setMessage]=useState("");
+  const [error,setError]=useState("");
+  async function submit(e) {
+    e.preventDefault(); setBusy(true); setError(""); setMessage("");
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email:email.trim(), password });
+        if (error) throw error;
+      } else {
+        if (password.length < 6) throw new Error("A senha precisa ter pelo menos 6 caracteres.");
+        const { data, error } = await supabase.auth.signUp({ email:email.trim(), password });
+        if (error) throw error;
+        if (!data.session) setMessage("Conta criada. Confira seu e-mail para confirmar o cadastro e depois entre no app.");
+      }
+    } catch (err) { setError(err?.message || "Não foi possível autenticar."); }
+    finally { setBusy(false); }
+  }
+  return <div style={{minHeight:"100vh",background:THEME.bg,color:THEME.text,fontFamily:"Inter,system-ui,sans-serif",display:"grid",placeItems:"center",padding:20}}>
+    <div style={{width:"100%",maxWidth:430,background:THEME.panel,border:`1px solid ${THEME.border}`,borderRadius:22,padding:24,boxShadow:"0 28px 80px rgba(0,0,0,.35)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:22}}><AppLogo/><div><div style={{fontSize:16,fontWeight:950}}>Financeiro Pessoal</div><div style={{fontSize:10,color:THEME.subtle,marginTop:2}}>V7.3 • sincronizado com o Supabase do Planner</div></div></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,padding:4,background:THEME.card,borderRadius:12,border:`1px solid ${THEME.border}`,marginBottom:18}}>
+        {[["login","Entrar"],["signup","Criar conta"]].map(([key,label])=><button key={key} type="button" onClick={()=>{setMode(key);setError("");setMessage("")}} style={{border:0,borderRadius:9,padding:"9px 10px",background:mode===key?THEME.accent:"transparent",color:mode===key?"white":THEME.muted,fontWeight:850,cursor:"pointer"}}>{label}</button>)}
+      </div>
+      <form onSubmit={submit} style={{display:"grid",gap:12}}>
+        <Field label="E-mail"><Input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="seu@email.com" autoComplete="email" required/></Field>
+        <Field label="Senha"><Input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" autoComplete={mode==="login"?"current-password":"new-password"} required/></Field>
+        {error&&<div style={{padding:10,borderRadius:10,background:THEME.expense+"18",color:THEME.expense,fontSize:11}}>{error}</div>}
+        {message&&<div style={{padding:10,borderRadius:10,background:THEME.income+"18",color:THEME.income,fontSize:11,lineHeight:1.5}}>{message}</div>}
+        <Button type="submit" disabled={busy} style={{width:"100%",padding:"11px 14px"}}>{busy?"Aguarde…":mode==="login"?"Entrar":"Criar minha conta"}</Button>
+      </form>
+      <div style={{fontSize:9.5,color:THEME.subtle,lineHeight:1.5,marginTop:16}}>Seus dados financeiros ficam vinculados ao usuário autenticado e protegidos por políticas de acesso no banco.</div>
+    </div>
+  </div>;
+}
+
+function generateSeries(base, count, type) {
+  const seriesId = base.seriesId || id("series");
+  const instances = [];
+  for (let i=0;i<count;i++) {
+    const dueDate = addMonthsToDate(base.dueDate, i);
+    instances.push({
+      ...base,
+      id:id(type==="receivable"?"rec":"bill"),
+      dueDate,
+      recurring:true,
+      seriesId,
+      seriesIndex:i,
+      payments:[],
+      createdAt:new Date().toISOString(),
+    });
+  }
+  return instances;
+}
+
+function automaticStatementMonth(card, purchaseDate) {
+  const ym=String(purchaseDate||today()).slice(0,7);
+  const day=Number(String(purchaseDate||today()).slice(8,10))||1;
+  return day>num(card?.closingDay||1)?shiftMonth(ym,1):ym;
+}
+function statementDueDate(card, ym) {
+  const dueYM=num(card?.dueDay||10)<=num(card?.closingDay||1)?shiftMonth(ym,1):ym;
+  return dateForMonth(dueYM, card?.dueDay || 10);
+}
+function cardStatementAmount(state, cardId, ym) {
+  return sum(state.cardInstallments.filter(x=>x.cardId===cardId && x.statementMonth===ym && x.status!=="refunded"), x=>x.amount);
+}
+function cardStatementPaid(state, cardId, ym) {
+  return sum(state.cardPayments.filter(x=>x.cardId===cardId && x.statementMonth===ym), x=>x.amount);
+}
+function cardCommittedAmount(state, cardId) {
+  const months=[...new Set(state.cardInstallments.filter(x=>x.cardId===cardId&&x.status!=="refunded").map(x=>x.statementMonth))];
+  return sum(months,m=>Math.max(0,cardStatementAmount(state,cardId,m)-cardStatementPaid(state,cardId,m)));
+}
+function cardAvailableLimit(state,card){
+  if(card?.availableLimitOverride!==null&&card?.availableLimitOverride!==undefined&&card?.availableLimitOverride!=="") return num(card.availableLimitOverride);
+  return Math.max(0,num(card?.limit)-cardCommittedAmount(state,card?.id));
+}
+function debtTypeLabel(type) {
+  return { financing:"Financiamento", loan:"Empréstimo", agreement:"Acordo / renegociação", informal:"Dívida informal", other:"Outra dívida", flexible:"Dívida informal" }[type] || "Dívida";
+}
+function debtFrequencyLabel(debt) {
+  const map={monthly:"Mensal",weekly:"Semanal",biweekly:"Quinzenal",bimonthly:"Bimestral",quarterly:"Trimestral",semiannual:"Semestral",annual:"Anual"};
+  if(debt?.frequency!=="custom") return map[debt?.frequency] || "Mensal";
+  const n=Math.max(1,num(debt.customFrequencyValue)||1);
+  return `A cada ${n} ${debt.customFrequencyUnit==="months"?(n===1?"mês":"meses"):(n===1?"dia":"dias")}`;
+}
+function advanceDebtDate(start, debt, index) {
+  const frequency=debt?.frequency||"monthly";
+  if(index<=0)return start;
+  const monthStep={monthly:1,bimonthly:2,quarterly:3,semiannual:6,annual:12}[frequency];
+  if(monthStep)return addMonthsToDate(start,monthStep*index);
+  const dayStep={weekly:7,biweekly:14}[frequency];
+  if(dayStep)return addDaysToDate(start,dayStep*index);
+  if(frequency==="custom"){
+    const n=Math.max(1,num(debt?.customFrequencyValue)||1);
+    return debt?.customFrequencyUnit==="months"?addMonthsToDate(start,n*index):addDaysToDate(start,n*index);
+  }
+  return addMonthsToDate(start,index);
+}
+function buildDebtSchedule(debt) {
+  const count=Math.max(0,Math.floor(num(debt?.totalInstallments)));
+  const amount=num(debt?.installmentValue);
+  const start=debt?.firstDueDate||"";
+  if(!count||amount<=0||!start)return [];
+  return Array.from({length:count},(_,i)=>({number:i+1,dueDate:advanceDebtDate(start,debt,i),amount}));
+}
+function normalizeDebtRecord(raw={}) {
+  const type=raw.type==="flexible"?"informal":(raw.type||"financing");
+  const firstDueDate=raw.firstDueDate || (raw.dueDay?dateForMonth(currentYM(),raw.dueDay):"");
+  const base={...raw,type,status:raw.status||"active",frequency:raw.frequency||"monthly",customFrequencyValue:Math.max(1,num(raw.customFrequencyValue)||1),customFrequencyUnit:raw.customFrequencyUnit||"days",firstDueDate,bankOutstandingBalance:raw.bankOutstandingBalance===null||raw.bankOutstandingBalance===undefined||raw.bankOutstandingBalance===""?null:num(raw.bankOutstandingBalance),contractValue:num(raw.contractValue),installmentValue:num(raw.installmentValue),totalInstallments:Math.max(0,Math.floor(num(raw.totalInstallments)))};
+  const existing=Array.isArray(raw.installmentSchedule)?raw.installmentSchedule.filter(Boolean).map((x,i)=>({number:Math.max(1,Math.floor(num(x.number))||i+1),dueDate:x.dueDate||advanceDebtDate(firstDueDate,base,i),amount:num(x.amount)})):[];
+  return {...base,installmentSchedule:existing.length?existing:buildDebtSchedule(base)};
+}
+function debtSchedule(state,debt) {
+  const existing=Array.isArray(debt?.installmentSchedule)?debt.installmentSchedule:[];
+  return (existing.length?existing:buildDebtSchedule(debt)).slice().sort((a,b)=>num(a.number)-num(b.number));
+}
+function debtEventsForMonth(state, debtId, ym) {
+  return state.debtEvents.filter(x=>x.debtId===debtId && inMonth(x.date,ym));
+}
+function debtInstallmentPayment(state,debtId,installmentNumber) {
+  return state.debtEvents.find(x=>x.debtId===debtId&&x.kind==="installment"&&num(x.installmentNumber)===num(installmentNumber)) || null;
+}
+function debtPaidInstallments(state, debtId) {
+  return new Set(state.debtEvents.filter(x=>x.debtId===debtId && x.kind==="installment").map(x=>num(x.installmentNumber))).size;
+}
+function debtInstallmentStatus(state,debt,inst) {
+  if(debtInstallmentPayment(state,debt.id,inst.number))return "paid";
+  if(inst.dueDate&&inst.dueDate<today())return "overdue";
+  return "pending";
+}
+function debtStatus(state,debt) {
+  if(["archived","cancelled"].includes(debt?.status))return "archived";
+  if(debt?.status==="settled")return "settled";
+  const schedule=debtSchedule(state,debt);
+  if(schedule.length&&schedule.every(inst=>debtInstallmentPayment(state,debt.id,inst.number)))return "settled";
+  return "active";
+}
+function debtNextInstallment(state,debt) {
+  if(debtStatus(state,debt)!=="active")return null;
+  return debtSchedule(state,debt).find(inst=>!debtInstallmentPayment(state,debt.id,inst.number)) || null;
+}
+function debtHasOverdue(state,debt) {
+  return debtSchedule(state,debt).some(inst=>debtInstallmentStatus(state,debt,inst)==="overdue");
+}
+function debtTotalPaid(state,debtId) {
+  return sum(state.debtEvents.filter(x=>x.debtId===debtId),x=>x.actualAmount||x.amount);
+}
+function debtDueForMonth(state, debt, ym) {
+  if(debtStatus(state,debt)!=="active")return 0;
+  return sum(debtSchedule(state,debt).filter(inst=>inMonth(inst.dueDate,ym)&&!debtInstallmentPayment(state,debt.id,inst.number)),inst=>inst.amount);
+}
+function debtDueNext30(state,debt) {
+  if(debtStatus(state,debt)!=="active")return 0;
+  return sum(debtSchedule(state,debt).filter(inst=>inNext30(inst.dueDate)&&!debtInstallmentPayment(state,debt.id,inst.number)),inst=>inst.amount);
+}
+function debtStatusLabel(status) { return status==="settled"?"Quitada":status==="archived"?"Cancelada / arquivada":"Ativa"; }
+function debtReasonLabel(reason) { return {none:"Sem diferença",interest:"Juros",fine:"Multa",discount:"Desconto",amortization:"Amortização",other:"Outro"}[reason]||"Sem diferença"; }
+function debtAmortizationEffectLabel(effect) { return effect==="installment"?"Reduziu valor das parcelas":"Reduziu prazo"; }
+function updateDebtInstallmentSchedule(state,debt,installmentNumber,data,scope) {
+  const target=num(installmentNumber);
+  let schedule=debtSchedule(state,debt).map(x=>({...x}));
+  const idx=schedule.findIndex(x=>num(x.number)===target);
+  if(idx<0)return debt;
+  if(scope!=="future"){
+    schedule[idx]={...schedule[idx],dueDate:data.dueDate,amount:num(data.amount)};
+  } else {
+    const baseDate=data.dueDate;
+    schedule=schedule.map((inst,i)=>{
+      if(i<idx)return inst;
+      return {...inst,dueDate:advanceDebtDate(baseDate,debt,i-idx),amount:num(data.amount)};
+    });
+  }
