@@ -1,0 +1,260 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const VERSION = 7;
+const APP_VERSION = "7.3";
+const STORAGE_KEY = "financeiro-pessoal-v7";
+const PROFILE_ALL = "__all__";
+const MONTHS = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
+const SUPABASE_URL = "https://pbwnzkmbcuoyyoojgnay.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_dP8vlwqtkoP3M_Otf8aJoQ_Ev052pDD";
+const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: { persistSession:true, autoRefreshToken:true, detectSessionInUrl:true },
+});
+
+const THEME = {
+  bg: "#0A0F18",
+  panel: "#101722",
+  card: "#141D2A",
+  card2: "#182333",
+  border: "#263449",
+  text: "#F4F7FB",
+  muted: "#92A1B5",
+  subtle: "#66758B",
+  accent: "#4F7CFF",
+  accent2: "#6F5BFF",
+  income: "#2BC58A",
+  expense: "#EF6671",
+  warning: "#E7AA45",
+  cyan: "#5AC8FA",
+  input: "#0D1520",
+  shadow: "0 18px 50px rgba(0,0,0,.20)",
+};
+
+const DEFAULT_CATEGORIES = [
+  { id: "cat-salario", name: "Salário", kind: "income" },
+  { id: "cat-clientes", name: "Clientes", kind: "income" },
+  { id: "cat-extra", name: "Renda extra", kind: "income" },
+  { id: "cat-moradia", name: "Moradia", kind: "expense" },
+  { id: "cat-alimentacao", name: "Alimentação", kind: "expense" },
+  { id: "cat-transporte", name: "Transporte", kind: "expense" },
+  { id: "cat-saude", name: "Saúde", kind: "expense" },
+  { id: "cat-educacao", name: "Educação", kind: "expense" },
+  { id: "cat-lazer", name: "Lazer", kind: "expense" },
+  { id: "cat-assinaturas", name: "Assinaturas", kind: "expense" },
+  { id: "cat-dividas", name: "Dívidas", kind: "expense" },
+  { id: "cat-outros", name: "Outros", kind: "both" },
+];
+
+function id(prefix="id") {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+}
+function num(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const s = String(v ?? "").trim().replace(/\s/g, "");
+  const normalized = s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+function money(v) {
+  return new Intl.NumberFormat("pt-BR", { style:"currency", currency:"BRL" }).format(num(v));
+}
+function localDate(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth()+1).padStart(2,"0");
+  const d = String(date.getDate()).padStart(2,"0");
+  return `${y}-${m}-${d}`;
+}
+function today() { return localDate(); }
+function currentYM() { return today().slice(0,7); }
+function monthName(ym) {
+  const [y,m] = String(ym).split("-");
+  return `${MONTHS[Math.max(0, Number(m)-1)]} ${y}`;
+}
+function shiftMonth(ym, delta) {
+  const [y,m] = String(ym).split("-").map(Number);
+  const d = new Date(y, (m||1)-1+delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+function dateForMonth(ym, day) {
+  const [y,m] = ym.split("-").map(Number);
+  const max = new Date(y,m,0).getDate();
+  return `${ym}-${String(Math.min(Math.max(1,Number(day)||1),max)).padStart(2,"0")}`;
+}
+function addMonthsToDate(date, delta) {
+  const [y,m,d] = date.split("-").map(Number);
+  const base = new Date(y,m-1+delta,1);
+  const max = new Date(base.getFullYear(),base.getMonth()+1,0).getDate();
+  base.setDate(Math.min(d,max));
+  return localDate(base);
+}
+function addDaysToDate(date, delta) {
+  const [y,m,d] = String(date||"").split("-").map(Number);
+  if(!y||!m||!d) return "";
+  return localDate(new Date(y,m-1,d+delta));
+}
+function daysDiff(a,b) {
+  const A = new Date(`${a}T12:00:00`);
+  const B = new Date(`${b}T12:00:00`);
+  return Math.round((B-A)/86400000);
+}
+function sum(arr, fn=x=>x) { return arr.reduce((s,x)=>s+num(fn(x)),0); }
+function paidTotal(item) { return sum(item?.payments || [], p=>p.amount); }
+function remaining(item) { return Math.max(0, num(item?.amount) - paidTotal(item)); }
+function statusFromItem(item) {
+  const paid = paidTotal(item);
+  const amount = num(item.amount);
+  if (amount > 0 && paid >= amount - 0.005) return "paid";
+  if (paid > 0) return "partial";
+  if (item.dueDate && item.dueDate < today()) return "overdue";
+  return "pending";
+}
+function urgency(dueDate) {
+  if (!dueDate) return { label:"Sem data", tone:"muted" };
+  const diff = daysDiff(today(), dueDate);
+  if (diff < 0) return { label:"Vencido", tone:"expense" };
+  if (diff === 0) return { label:"Vence hoje", tone:"warning" };
+  if (diff <= 7) return { label:`Em ${diff} dia${diff===1?"":"s"}`, tone:"warning" };
+  return { label:new Date(`${dueDate}T12:00:00`).toLocaleDateString("pt-BR"), tone:"muted" };
+}
+function profileMatch(item, activeProfileId) {
+  return activeProfileId === PROFILE_ALL || item.profileId === activeProfileId;
+}
+function inMonth(date, ym) { return String(date||"").startsWith(ym); }
+function inNext30(date) {
+  if (!date) return false;
+  const diff = daysDiff(today(), date);
+  return diff >= 0 && diff <= 30;
+}
+function scopedByView(items, ym, mode, dateField="dueDate") {
+  return items.filter(x => mode === "30d" ? inNext30(x[dateField]) : inMonth(x[dateField], ym));
+}
+
+function emptyState() {
+  return {
+    version: VERSION,
+    profiles: [
+      { id:"profile-pessoal", name:"Pessoal", type:"personal", color:THEME.accent, createdAt:new Date().toISOString() },
+    ],
+    activeProfileId: "profile-pessoal",
+    categories: DEFAULT_CATEGORIES,
+    receivables: [],
+    bills: [],
+    cards: [],
+    cardInstallments: [],
+    cardPayments: [],
+    debts: [],
+    debtEvents: [],
+    goals: [],
+    accounts: [],
+    balanceSnapshot: { total:0, updatedAt:null, useAccountSum:false },
+    settings: { theme:"dark", defaultView:"month", recurrenceMonths:18 },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function normalizeState(raw) {
+  const base = emptyState();
+  if (!raw || typeof raw !== "object") return base;
+  return {
+    ...base,
+    ...raw,
+    version: VERSION,
+    profiles: Array.isArray(raw.profiles) && raw.profiles.length ? raw.profiles : base.profiles,
+    categories: Array.isArray(raw.categories) && raw.categories.length ? raw.categories : base.categories,
+    receivables: Array.isArray(raw.receivables) ? raw.receivables : [],
+    bills: Array.isArray(raw.bills) ? raw.bills : [],
+    cards: Array.isArray(raw.cards) ? raw.cards : [],
+    cardInstallments: Array.isArray(raw.cardInstallments) ? raw.cardInstallments : [],
+    cardPayments: Array.isArray(raw.cardPayments) ? raw.cardPayments : [],
+    debts: Array.isArray(raw.debts) ? raw.debts.map(normalizeDebtRecord) : [],
+    debtEvents: Array.isArray(raw.debtEvents) ? raw.debtEvents : [],
+    goals: Array.isArray(raw.goals) ? raw.goals : [],
+    accounts: Array.isArray(raw.accounts) ? raw.accounts : [],
+    balanceSnapshot: { ...base.balanceSnapshot, ...(raw.balanceSnapshot || {}) },
+    settings: { ...base.settings, ...(raw.settings || {}) },
+  };
+}
+
+function tryLegacyMigration() {
+  if (typeof window === "undefined") return null;
+  try {
+    const receivables = JSON.parse(localStorage.getItem("fin-v6-recebimentos") || "[]");
+    const bills = JSON.parse(localStorage.getItem("fin-v6-contas") || "[]");
+    const cards = JSON.parse(localStorage.getItem("fin-v6-cartoes") || "[]");
+    const debts = JSON.parse(localStorage.getItem("fin-v6-financiamentos") || "[]");
+    const hasAny = [receivables,bills,cards,debts].some(x=>Array.isArray(x)&&x.length);
+    if (!hasAny) return null;
+    const state = emptyState();
+    const p = state.profiles[0].id;
+    state.receivables = (receivables||[]).map(x=>({
+      id:x.id || id("rec"), profileId:p, name:x.source||x.from||x.name||x.desc||"Recebimento",
+      amount:num(x.value||x.amount), dueDate:x.date||x.dueDate||today(), categoryId:"cat-outros",
+      recurring:Boolean(x.recurring), seriesId:x.seriesId||null, payments:x.status==="received"||x.status==="paid"?[{id:id("pay"),date:x.paidDate||x.date||today(),amount:num(x.actualValue||x.value||x.amount),method:x.method||"",note:"Migração V6"}]:[],
+      note:x.note||"", createdAt:new Date().toISOString(),
+    }));
+    state.bills = (bills||[]).map(x=>({
+      id:x.id||id("bill"), profileId:p, name:x.name||x.desc||"Conta", amount:num(x.value||x.amount), dueDate:x.dueDate||x.date||today(), categoryId:"cat-outros",
+      recurring:Boolean(x.recurring), seriesId:x.seriesId||null, payments:x.status==="paid"?[{id:id("pay"),date:x.paidDate||x.date||today(),amount:num(x.actualPaid||x.value||x.amount),method:"",note:"Migração V6"}]:[], note:x.note||"", createdAt:new Date().toISOString(),
+    }));
+    state.cards = (cards||[]).map(x=>({ id:x.id||id("card"),profileId:p,name:x.name||x.nome||"Cartão",closingDay:num(x.closingDay)||1,dueDay:num(x.dueDay)||10,limit:num(x.limit),createdAt:new Date().toISOString() }));
+    state.debts = (debts||[]).map(x=>normalizeDebtRecord({ id:x.id||id("debt"),profileId:p,name:x.name||x.nome||"Dívida",type:x.type||"financing",contractValue:num(x.contractValue||x.total||x.valorTotal),installmentValue:num(x.installmentValue||x.parcela),totalInstallments:num(x.totalInstallments||x.installments),dueDay:num(x.dueDay)||10,status:"active",createdAt:new Date().toISOString() }));
+    return state;
+  } catch { return null; }
+}
+
+const localAdapter = {
+  async load() {
+    if (typeof window === "undefined") return emptyState();
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return normalizeState(JSON.parse(raw));
+      const migrated = tryLegacyMigration();
+      if (migrated) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+        return normalizeState(migrated);
+      }
+    } catch {}
+    return emptyState();
+  },
+  async save(state) {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, version:VERSION, updatedAt:new Date().toISOString() }));
+  }
+};
+
+const cloudAdapter = {
+  async load(userId) {
+    const { data, error } = await supabase
+      .from("fin_app_state")
+      .select("state,version,updated_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw error;
+    return data?.state ? { state:normalizeState(data.state), updatedAt:data.updated_at || null } : null;
+  },
+  async remoteUpdatedAt(userId) {
+    const { data, error } = await supabase
+      .from("fin_app_state")
+      .select("updated_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw error;
+    return data?.updated_at || null;
+  },
+  async save(userId, state) {
+    const now = new Date().toISOString();
+    const payload = { ...state, version:VERSION, updatedAt:now };
+    const { data, error } = await supabase
+      .from("fin_app_state")
+      .upsert({ user_id:userId, state:payload, version:VERSION, updated_at:now }, { onConflict:"user_id" })
+      .select("updated_at")
+      .single();
+    if (error) throw error;
+    return { state:payload, updatedAt:data?.updated_at || now };
+  },
+};
+
+function AuthScreen() {
