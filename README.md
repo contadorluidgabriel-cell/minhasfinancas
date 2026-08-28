@@ -4,7 +4,7 @@ Aplicativo pessoal de controle financeiro em React/Vite, com autenticação e si
 
 ## Versão atual
 
-**V7.3 alpha**
+**V7.3.2**
 
 Módulos principais:
 - painel financeiro mensal e próximos 30 dias;
@@ -17,6 +17,14 @@ Módulos principais:
 - calendário financeiro;
 - histórico e relatórios;
 - perfis financeiros e sincronização em nuvem.
+
+### Atualização visual — V7.3.2
+- nova linguagem de ícones vetoriais em toda a navegação;
+- hierarquia visual refinada no painel;
+- cards e KPIs com menos ruído e melhor leitura;
+- ações rápidas mais compactas e consistentes;
+- sidebar, campos, tabelas, modais e estados vazios revisados;
+- espaçamento e responsividade ajustados para desktop e telas menores.
 
 ### Dívidas e financiamentos — V7.3
 - cards enxutos com dívida, parcela e próximo vencimento;
