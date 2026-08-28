@@ -1,0 +1,56 @@
+    <div className="card-grid">{cards.map(c=>{const total=cardStatementAmount(state,c.id,ym),paid=cardStatementPaid(state,c.id,ym),open=Math.max(0,total-paid),due=statementDueDate(c,ym),overdue=open>0&&due<today(),available=cardAvailableLimit(state,c);return <Card key={c.id} style={overdue?{border:`1px solid ${THEME.expense}88`,background:THEME.expense+"0B"}:undefined}><CardBody><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}><div><div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}><div style={{fontSize:14,fontWeight:950}}>{c.name}</div>{c.active===false&&<Badge tone="muted">Inativo</Badge>}</div><div style={{fontSize:10,color:overdue?THEME.expense:THEME.muted,marginTop:4,fontWeight:overdue?850:600}}>Vencimento: {new Date(`${due}T12:00:00`).toLocaleDateString("pt-BR")}{overdue?" • vencida":""}</div></div><Badge tone="cyan">{monthName(ym)}</Badge></div><div style={{fontSize:25,fontWeight:950,marginTop:18,color:overdue?THEME.expense:THEME.cyan}}>{money(open)}</div><div style={{fontSize:10,color:THEME.subtle}}>fatura atual em aberto</div><div className="two-col" style={{gap:8,marginTop:15}}><div style={{padding:10,borderRadius:11,background:THEME.card2}}><div className="metric-label">Limite total</div><div className="metric-value">{money(c.limit)}</div></div><div style={{padding:10,borderRadius:11,background:THEME.card2}}><div className="metric-label">Disponível</div><div className="metric-value" style={{color:available<=num(c.limit)*.15?THEME.warning:THEME.text}}>{money(available)}</div></div></div><Button style={{width:"100%",marginTop:12}} onClick={()=>setSelectedCardId(c.id)}>Abrir cartão</Button></CardBody></Card>})}{cards.length===0&&<Card><Empty>Cadastre um cartão para começar.</Empty></Card>}</div>
+  </div>;
+
+  const current=state.cardInstallments.filter(x=>x.cardId===card.id&&x.statementMonth===ym).sort((a,b)=>String(b.purchaseDate).localeCompare(String(a.purchaseDate)));
+  const currentTotal=cardStatementAmount(state,card.id,ym), currentPaid=cardStatementPaid(state,card.id,ym), currentOpen=Math.max(0,currentTotal-currentPaid);
+  const due=statementDueDate(card,ym), overdue=currentOpen>0&&due<today();
+  const futureMonths=[...new Set(state.cardInstallments.filter(x=>x.cardId===card.id&&x.statementMonth>ym&&x.status!=="refunded").map(x=>x.statementMonth))].sort().slice(0,8);
+  const available=cardAvailableLimit(state,card);
+  function refund(inst){if(inst.status==="refunded")return;setState(s=>({...s,cardInstallments:s.cardInstallments.map(x=>x.id===inst.id?{...x,status:"refunded"}:x)}));}
+  function restore(inst){setState(s=>({...s,cardInstallments:s.cardInstallments.map(x=>x.id===inst.id?{...x,status:"active"}:x)}));}
+  function remove(inst){if(!window.confirm(`Excluir definitivamente “${inst.description}”?`))return;setState(s=>({...s,cardInstallments:s.cardInstallments.filter(x=>x.id!==inst.id)}));}
+  return <div style={{display:"grid",gap:14}}>
+    <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}><div style={{display:"flex",gap:10,alignItems:"center"}}><Button ghost onClick={()=>setSelectedCardId(null)}>← Voltar</Button><div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><div style={{fontSize:18,fontWeight:950}}>{card.name}</div>{card.active===false&&<Badge>Inativo</Badge>}</div><div style={{fontSize:11,color:THEME.muted,marginTop:3}}>Tudo do cartão em uma única tela</div></div></div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}><Button tone="cyan" onClick={()=>openModal("newCardPurchase",{cardId:card.id})}>+ Compra</Button><Button ghost onClick={()=>openModal("editCard",card)}>Editar cartão</Button><Button ghost tone="expense" onClick={()=>openModal("manageCard",card)}>Excluir / inativar</Button></div></div>
+    <Card style={overdue?{border:`1px solid ${THEME.expense}88`}:undefined}><CardBody><div className="card-summary-grid"><div><div className="metric-label">Fatura atual</div><div style={{fontSize:30,fontWeight:950,color:overdue?THEME.expense:THEME.cyan,marginTop:5}}>{money(currentOpen)}</div><div style={{fontSize:10,color:overdue?THEME.expense:THEME.subtle,marginTop:5}}>{overdue?"Fatura vencida • ":""}vence {new Date(`${due}T12:00:00`).toLocaleDateString("pt-BR")}</div></div><div><div className="metric-label">Limite total</div><div className="metric-value">{money(card.limit)}</div></div><div><div className="metric-label">Limite disponível</div><div className="metric-value">{money(available)}</div><div style={{fontSize:9.5,color:THEME.subtle,marginTop:4}}>{card.availableLimitOverride!==null&&card.availableLimitOverride!==undefined&&card.availableLimitOverride!==""?"Ajustado manualmente":"Calculado automaticamente"}</div></div><div><div className="metric-label">Fechamento</div><div className="metric-value">Dia {card.closingDay}</div></div></div><div style={{display:"flex",gap:8,marginTop:16,flexWrap:"wrap"}}><Button tone="income" disabled={currentOpen<=0} onClick={()=>openModal("payCard",{card,ym,open:currentOpen})}>Pagar fatura</Button><Button ghost onClick={()=>openModal("adjustCardLimit",card)}>Ajustar limite disponível</Button></div></CardBody></Card>
+    <Card><SectionHeader title={`Fatura atual • ${monthName(ym)}`} sub={`Total ${money(currentTotal)} • pago ${money(currentPaid)} • aberto ${money(currentOpen)}`}/><div style={{overflowX:"auto"}}>{current.length===0?<Empty>Nenhuma compra nesta fatura.</Empty>:<table className="table"><thead><tr><th>Data</th><th>Compra</th><th>Categoria</th><th>Parcela</th><th>Status</th><th style={{textAlign:"right"}}>Valor</th><th>Ações</th></tr></thead><tbody>{current.map(x=><tr key={x.id} style={x.status==="refunded"?{opacity:.55}:undefined}><td>{new Date(`${x.purchaseDate}T12:00:00`).toLocaleDateString("pt-BR")}</td><td><div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><b>{x.description}</b>{x.purchaseType==="subscription"&&<Badge tone="accent">Assinatura</Badge>}</div></td><td>{categoryName(state,x.categoryId)}</td><td>{x.purchaseType==="installment"?`${x.installmentNumber}/${x.installments}`:"—"}</td><td><Badge tone={x.status==="refunded"?"muted":currentOpen<=0?"income":"cyan"}>{x.status==="refunded"?"Estornada":currentOpen<=0?"Fatura paga":"Na fatura"}</Badge></td><td style={{textAlign:"right",fontWeight:900}}>{x.status==="refunded"?<s>{money(x.amount)}</s>:money(x.amount)}</td><td><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Button ghost onClick={()=>openModal("editCardPurchase",x)}>Editar</Button>{x.status==="refunded"?<Button ghost onClick={()=>restore(x)}>Reativar</Button>:<Button ghost tone="warning" onClick={()=>refund(x)}>Estornar</Button>}<Button ghost tone="expense" onClick={()=>remove(x)}>Excluir</Button></div></td></tr>)}</tbody></table>}</div></Card>
+    <Card><SectionHeader title="Próximas faturas" sub="Total previsto e compras que já comprometem cada mês"/><CardBody style={{display:"grid",gap:10}}>{futureMonths.length===0?<Empty>Nenhuma compra comprometendo faturas futuras.</Empty>:futureMonths.map(m=>{const list=state.cardInstallments.filter(x=>x.cardId===card.id&&x.statementMonth===m&&x.status!=="refunded").sort((a,b)=>String(a.purchaseDate).localeCompare(String(b.purchaseDate)));return <div key={m} style={{border:`1px solid ${THEME.border}`,borderRadius:13,overflow:"hidden"}}><div style={{padding:"11px 12px",background:THEME.card2,display:"flex",justifyContent:"space-between",gap:10}}><b style={{fontSize:11}}>{monthName(m)}</b><b style={{fontSize:12,color:THEME.cyan}}>{money(cardStatementAmount(state,card.id,m))}</b></div><div>{list.map(x=><div key={x.id} style={{padding:"9px 12px",display:"flex",justifyContent:"space-between",gap:12,borderTop:`1px solid ${THEME.border}`,fontSize:10.5}}><div><b>{x.description}</b><span style={{color:THEME.subtle,marginLeft:6}}>{x.purchaseType==="installment"?`${x.installmentNumber}/${x.installments}`:x.purchaseType==="subscription"?"Assinatura":""}</span></div><span style={{fontWeight:850}}>{money(x.amount)}</span></div>)}</div></div>})}</CardBody></Card>
+    <Card><SectionHeader title="Configurações do cartão" sub="Fatura fechada continua editável; o app usa o fechamento como sugestão, não como trava."/><CardBody><div className="card-summary-grid"><div><div className="metric-label">Fechamento</div><div className="metric-value">Dia {card.closingDay}</div></div><div><div className="metric-label">Vencimento</div><div className="metric-value">Dia {card.dueDay}</div></div><div><div className="metric-label">Status</div><div className="metric-value">{card.active===false?"Inativo":"Ativo"}</div></div><div><div className="metric-label">Limite comprometido</div><div className="metric-value">{money(cardCommittedAmount(state,card.id))}</div></div></div></CardBody></Card>
+  </div>;
+}
+
+function DebtsPage({state,setState,openModal,activeProfileId}) {
+  const [selectedDebtId,setSelectedDebtId]=useState(null);
+  const [detailTab,setDetailTab]=useState("summary");
+  const [statusFilter,setStatusFilter]=useState("active");
+  const [typeFilter,setTypeFilter]=useState("all");
+  const [profileFilter,setProfileFilter]=useState(activeProfileId===PROFILE_ALL?"all":activeProfileId);
+  const [dueFilter,setDueFilter]=useState("all");
+  const [minValue,setMinValue]=useState("");
+  const [maxValue,setMaxValue]=useState("");
+  const sort=state.settings?.debtSort||"nextDueAsc";
+  useEffect(()=>{setProfileFilter(activeProfileId===PROFILE_ALL?"all":activeProfileId)},[activeProfileId]);
+  const scoped=state.debts.filter(d=>activeProfileId===PROFILE_ALL||d.profileId===activeProfileId);
+  const visible=scoped.filter(d=>{
+    const status=debtStatus(state,d); const next=debtNextInstallment(state,d); const value=num(next?.amount||d.installmentValue);
+    if(statusFilter!=="all"&&status!==statusFilter)return false;
+    if(typeFilter!=="all"&&d.type!==typeFilter)return false;
+    if(profileFilter!=="all"&&d.profileId!==profileFilter)return false;
+    if(minValue!==""&&value<num(minValue))return false;
+    if(maxValue!==""&&value>num(maxValue))return false;
+    if(dueFilter!=="all"){
+      if(dueFilter==="none"&&!next)return true;
+      if(!next)return false;
+      const diff=daysDiff(today(),next.dueDate);
+      if(dueFilter==="overdue"&&diff>=0)return false;
+      if(dueFilter==="7d"&&(diff<0||diff>7))return false;
+      if(dueFilter==="30d"&&(diff<0||diff>30))return false;
+    }
+    return true;
+  }).sort((a,b)=>{
+    const na=debtNextInstallment(state,a), nb=debtNextInstallment(state,b);
+    if(sort==="name")return String(a.name).localeCompare(String(b.name),"pt-BR");
+    if(sort==="valueAsc")return num(na?.amount||a.installmentValue)-num(nb?.amount||b.installmentValue);
+    if(sort==="valueDesc")return num(nb?.amount||b.installmentValue)-num(na?.amount||a.installmentValue);
+    const da=na?.dueDate||"9999-12-31", db=nb?.dueDate||"9999-12-31";
+    return sort==="nextDueDesc"?db.localeCompare(da):da.localeCompare(db);
+  });
