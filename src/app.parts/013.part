@@ -1,0 +1,117 @@
+function GoalForm({profileId,onClose,onSave}) { const [name,setName]=useState("");const [target,setTarget]=useState("");const [deadline,setDeadline]=useState("");const [monthly,setMonthly]=useState("");return <Modal title="Nova meta" onClose={onClose} width={520}><form onSubmit={e=>{e.preventDefault();if(!name.trim()||num(target)<=0)return;onSave({profileId,name:name.trim(),target:num(target),deadline,monthlyPlanned:num(monthly),status:"active"})}} style={{display:"grid",gap:12}}><Field label="Nome da meta"><Input value={name} onChange={e=>setName(e.target.value)} required/></Field><div className="two-col-form"><Field label="Valor-alvo"><Input value={target} onChange={e=>setTarget(e.target.value)} inputMode="decimal"/></Field><Field label="Prazo"><Input type="date" value={deadline} onChange={e=>setDeadline(e.target.value)}/></Field></div><Field label="Aporte planejado por mês"><Input value={monthly} onChange={e=>setMonthly(e.target.value)} inputMode="decimal"/></Field><div style={{display:"flex",justifyContent:"flex-end",gap:8}}><Button ghost onClick={onClose}>Cancelar</Button><Button type="submit">Salvar meta</Button></div></form></Modal>; }
+
+export default function App() {
+  const [state,setState]=useState(emptyState());
+  const [loading,setLoading]=useState(true);
+  const [authLoading,setAuthLoading]=useState(true);
+  const [session,setSession]=useState(null);
+  const [syncStatus,setSyncStatus]=useState("idle");
+  const [lastSyncedAt,setLastSyncedAt]=useState(null);
+  const [isOnline,setIsOnline]=useState(typeof navigator==="undefined"?true:navigator.onLine);
+  const [syncNonce,setSyncNonce]=useState(0);
+  const [tab,setTab]=useState("dashboard");
+  const [ym,setYm]=useState(currentYM());
+  const [viewMode,setViewMode]=useState("month");
+  const [sideOpen,setSideOpen]=useState(false);
+  const [search,setSearch]=useState("");
+  const [modal,setModal]=useState(null);
+  const hydrated=useRef(false);
+  const syncTimer=useRef(null);
+  const lastCloudUpdatedAt=useRef(null);
+  const pendingSync=useRef(false);
+
+  useEffect(()=>{
+    if(typeof window==="undefined")return;
+    const online=()=>{setIsOnline(true);setSyncNonce(n=>n+1);};
+    const offline=()=>{setIsOnline(false);setSyncStatus("offline");};
+    window.addEventListener("online",online); window.addEventListener("offline",offline);
+    return ()=>{window.removeEventListener("online",online);window.removeEventListener("offline",offline);};
+  },[]);
+
+  useEffect(()=>{
+    let alive=true;
+    supabase.auth.getSession().then(({data})=>{if(alive){setSession(data.session||null);setAuthLoading(false)}});
+    const { data:{ subscription } } = supabase.auth.onAuthStateChange((_event,nextSession)=>{if(alive){setSession(nextSession||null);setAuthLoading(false)}});
+    return ()=>{alive=false;subscription.unsubscribe();};
+  },[]);
+
+  useEffect(()=>{
+    if(!session?.user?.id){hydrated.current=false;setLoading(false);return;}
+    let cancelled=false;
+    (async()=>{
+      setLoading(true); setSyncStatus("saving"); hydrated.current=false;
+      try {
+        let cloud=await cloudAdapter.load(session.user.id);
+        let loaded;
+        if(!cloud){
+          loaded=await localAdapter.load();
+          const saved=await cloudAdapter.save(session.user.id,loaded);
+          lastCloudUpdatedAt.current=saved.updatedAt; setLastSyncedAt(saved.updatedAt);
+        } else {
+          loaded=cloud.state; lastCloudUpdatedAt.current=cloud.updatedAt; setLastSyncedAt(cloud.updatedAt);
+        }
+        if(cancelled)return;
+        setState(normalizeState(loaded));
+        setViewMode(loaded.settings?.defaultView||"month");
+        await localAdapter.save(loaded);
+        setSyncStatus("synced");
+        setLoading(false);
+        setTimeout(()=>{if(!cancelled)hydrated.current=true},0);
+      } catch(err) {
+        console.error("Falha ao carregar dados do Supabase",err);
+        const fallback=await localAdapter.load();
+        if(cancelled)return;
+        setState(fallback); setViewMode(fallback.settings?.defaultView||"month");
+        setSyncStatus("error"); setLoading(false); setTimeout(()=>{if(!cancelled)hydrated.current=true},0);
+      }
+    })();
+    return ()=>{cancelled=true};
+  },[session?.user?.id]);
+
+  useEffect(()=>{
+    if(!session?.user?.id||loading||!hydrated.current)return;
+    localAdapter.save(state);
+    pendingSync.current=true;
+    if(!isOnline){setSyncStatus("offline");return;}
+    setSyncStatus("saving");
+    clearTimeout(syncTimer.current);
+    syncTimer.current=setTimeout(async()=>{
+      try {
+        const remoteAt=await cloudAdapter.remoteUpdatedAt(session.user.id);
+        const remoteMs=remoteAt?new Date(remoteAt).getTime():0;
+        const knownMs=lastCloudUpdatedAt.current?new Date(lastCloudUpdatedAt.current).getTime():0;
+        if(knownMs && remoteMs && remoteMs>knownMs+250){
+          throw new Error("Os dados foram alterados em outro dispositivo. Recarregue antes de sobrescrever a versão mais nova.");
+        }
+        const saved=await cloudAdapter.save(session.user.id,state);
+        lastCloudUpdatedAt.current=saved.updatedAt; setLastSyncedAt(saved.updatedAt); pendingSync.current=false; setSyncStatus("synced");
+      }
+      catch(err){ console.error("Falha ao sincronizar",err); setSyncStatus("error"); }
+    },700);
+    return ()=>clearTimeout(syncTimer.current);
+  },[state,session?.user?.id,loading,isOnline,syncNonce]);
+
+  function retrySync(){ if(!isOnline)return; setSyncNonce(n=>n+1); }
+
+  async function signOut(){ await supabase.auth.signOut(); setState(emptyState()); setTab("dashboard"); }
+
+  const metrics=useMemo(()=>buildMetrics(state,state.activeProfileId,ym,viewMode),[state,ym,viewMode]);
+  const openModal=(type,payload=null)=>setModal({type,payload});
+  function backup(){const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`financeiro-v7-3-backup-${today()}.json`;a.click();URL.revokeObjectURL(url);}
+  async function restore(file){try{const text=await file.text();const parsed=normalizeState(JSON.parse(text));if(!window.confirm("Restaurar este backup e substituir os dados atuais?"))return;setState(parsed);alert("Backup restaurado.");}catch{alert("Não foi possível restaurar este arquivo.");}}
+
+  if(authLoading)return <div style={{minHeight:"100vh",display:"grid",placeItems:"center",background:THEME.bg,color:THEME.muted,fontFamily:"Inter,system-ui,sans-serif"}}>Verificando sua sessão…</div>;
+  if(!session)return <AuthScreen/>;
+  if(loading)return <div style={{minHeight:"100vh",display:"grid",placeItems:"center",background:THEME.bg,color:THEME.muted,fontFamily:"Inter,system-ui,sans-serif"}}>Sincronizando suas finanças…</div>;
+  return <div style={{minHeight:"100vh",background:THEME.bg,color:THEME.text,fontFamily:"Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"}}>
+    <style>{`
+      *{box-sizing:border-box}body{margin:0;background:${THEME.bg}}button,input,select,textarea{font:inherit}button{transition:.15s ease}button:hover:not(:disabled){filter:brightness(1.08)}
+      .shell{display:grid;grid-template-columns:235px minmax(0,1fr);min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;padding:16px 12px;z-index:60}.content{min-width:0}.main{max-width:1500px;margin:0 auto;padding:22px 24px 60px}
+      .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.kpi-grid-six{grid-template-columns:repeat(3,minmax(0,1fr))}.dash-columns{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(310px,.75fr);gap:14px}.card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.two-col-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+      .table{width:100%;border-collapse:collapse;min-width:760px}.table th{padding:10px 13px;text-align:left;font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;color:${THEME.subtle};font-weight:850;border-bottom:1px solid ${THEME.border};background:${THEME.card2}88}.table td{padding:11px 13px;font-size:11px;color:${THEME.text};border-bottom:1px solid ${THEME.border}99}.table tr:last-child td{border-bottom:0}.table .overdue-row td{background:${THEME.expense}18;border-bottom-color:${THEME.expense}44}.table .overdue-row td:first-child{box-shadow:inset 3px 0 0 ${THEME.expense}}.subline{font-size:9.5px;color:${THEME.subtle};margin-top:3px}.flow-filter-grid{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:9px}.value-range{display:grid;grid-template-columns:1fr 1fr;gap:7px}.card-summary-grid{display:grid;grid-template-columns:1.4fr repeat(3,1fr);gap:14px;align-items:start}.metric-label{font-size:9.5px;color:${THEME.muted};font-weight:800;text-transform:uppercase}.metric-value{font-size:15px;font-weight:950;margin-top:4px}
+      .calendar-head{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}.calendar-head>div{text-align:center;font-size:9.5px;color:${THEME.subtle};font-weight:850}.calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}.cal-cell{min-height:110px;padding:8px;border-radius:11px;background:${THEME.card2};border:1px solid ${THEME.border}.empty-cell{background:transparent;border-color:transparent}
+      .mobile-only{display:none}
+      @media(max-width:1150px){.shell{grid-template-columns:76px minmax(0,1fr)}.flow-filter-grid{grid-template-columns:repeat(3,minmax(130px,1fr))}.card-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi-grid-six{grid-template-columns:repeat(2,minmax(0,1fr))}.sidebar-copy{display:none}.card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-columns{grid-template-columns:1fr}.top-actions>input:first-child{display:none}}
+      @media(max-width:760px){.shell{display:block}.flow-filter-grid{grid-template-columns:1fr 1fr}.card-summary-grid{grid-template-columns:1fr 1fr}.kpi-grid-six{grid-template-columns:1fr 1fr}.sidebar{position:fixed;left:0;top:0;bottom:0;width:245px;transform:translateX(-105%);transition:.2s;box-shadow:0 30px 90px rgba(0,0,0,.5)}.sidebar.open{transform:translateX(0)}.sidebar-copy{display:block}.mobile-only{display:inline-flex}.main{padding:16px 12px 70px}.kpi-grid,.card-grid,.two-col,.two-col-form{grid-template-columns:1fr}.kpi-grid-six{grid-template-columns:repeat(2,minmax(0,1fr))!important}.top-actions>select,.top-actions>div{display:none}.top-actions input[type=month]{display:block!important;width:125px!important}.calendar-grid{gap:3px}.cal-cell{min-height:82px;padding:5px}.hero{padding:17px!important}}
+      @media print{.sidebar,header,button{display:none!important}.shell{display:block}.main{padding:0}.card{box-shadow:none}}
+    `}</style>
