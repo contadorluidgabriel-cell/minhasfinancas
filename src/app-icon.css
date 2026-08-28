@@ -1,0 +1,9 @@
+.app-logo {
+  background: #070C14 url('/icons/icon-512.webp') center/cover no-repeat !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  letter-spacing: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(91,127,255,.24) !important;
+  box-shadow: 0 10px 28px rgba(91,127,255,.18) !important;
+}
