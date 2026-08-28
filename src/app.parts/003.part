@@ -1,0 +1,123 @@
+  const firstOpen=schedule.find(x=>!debtInstallmentPayment(state,debt.id,x.number));
+  return {...debt,installmentSchedule:schedule,installmentValue:firstOpen?num(firstOpen.amount):num(data.amount),firstDueDate:schedule[0]?.dueDate||debt.firstDueDate,totalInstallments:schedule.length};
+}
+function applyDebtAmortization(state,debt,event) {
+  let schedule=debtSchedule(state,debt).map(x=>({...x}));
+  const paidNumbers=new Set(state.debtEvents.filter(x=>x.debtId===debt.id&&x.kind==="installment").map(x=>num(x.installmentNumber)));
+  const unpaid=schedule.filter(x=>!paidNumbers.has(num(x.number)));
+  const amount=Math.max(0,num(event.actualAmount||event.amount));
+  if(!unpaid.length||amount<=0)return debt;
+  if(event.effect==="installment"){
+    const outstanding=sum(unpaid,x=>x.amount);
+    const newOutstanding=Math.max(0,outstanding-amount);
+    if(newOutstanding<=0.005){
+      schedule=schedule.filter(x=>paidNumbers.has(num(x.number)));
+      return {...debt,installmentSchedule:schedule,totalInstallments:schedule.length,installmentValue:0,status:"settled"};
+    }
+    const per=newOutstanding/unpaid.length;
+    schedule=schedule.map(x=>paidNumbers.has(num(x.number))?x:{...x,amount:Number(per.toFixed(2))});
+    return {...debt,installmentSchedule:schedule,totalInstallments:schedule.length,installmentValue:Number(per.toFixed(2))};
+  }
+  let left=amount;
+  for(let i=schedule.length-1;i>=0&&left>0.005;i--){
+    const inst=schedule[i];
+    if(paidNumbers.has(num(inst.number)))continue;
+    const value=num(inst.amount);
+    if(left>=value-0.005){ left-=value; schedule.splice(i,1); }
+    else { schedule[i]={...inst,amount:Number(Math.max(0,value-left).toFixed(2))}; left=0; }
+  }
+  const remainingUnpaid=schedule.filter(x=>!paidNumbers.has(num(x.number)));
+  return {...debt,installmentSchedule:schedule,totalInstallments:schedule.length,installmentValue:remainingUnpaid[0]?num(remainingUnpaid[0].amount):0,status:remainingUnpaid.length?debt.status:"settled"};
+}
+
+function TONE(tone) {
+  return { accent:THEME.accent, income:THEME.income, expense:THEME.expense, warning:THEME.warning, muted:THEME.muted, cyan:THEME.cyan }[tone] || THEME.muted;
+}
+
+function Button({children,onClick,tone="accent",ghost=false,disabled=false,type="button",style}) {
+  const c=TONE(tone);
+  return <button type={type} disabled={disabled} onClick={onClick} style={{border:`1px solid ${ghost?THEME.border:c+"66"}`,background:ghost?"transparent":c+"18",color:ghost?THEME.text:c,borderRadius:11,padding:"9px 12px",fontSize:12,fontWeight:800,cursor:disabled?"not-allowed":"pointer",opacity:disabled?.5:1,...style}}>{children}</button>;
+}
+function Field({label,children,hint}) { return <label style={{display:"grid",gap:6,fontSize:11,fontWeight:750,color:THEME.muted}}><span>{label}</span>{children}{hint&&<small style={{fontWeight:500,color:THEME.subtle}}>{hint}</small>}</label>; }
+function Input(props) { return <input {...props} style={{width:"100%",background:THEME.input,border:`1px solid ${THEME.border}`,borderRadius:11,color:THEME.text,padding:"10px 12px",fontSize:13,outline:"none",...(props.style||{})}}/>; }
+function Select({children,...props}) { return <select {...props} style={{width:"100%",background:THEME.input,border:`1px solid ${THEME.border}`,borderRadius:11,color:THEME.text,padding:"10px 12px",fontSize:13,outline:"none",...(props.style||{})}}>{children}</select>; }
+function Textarea(props) { return <textarea {...props} style={{width:"100%",minHeight:78,resize:"vertical",background:THEME.input,border:`1px solid ${THEME.border}`,borderRadius:11,color:THEME.text,padding:"10px 12px",fontSize:13,outline:"none",...(props.style||{})}}/>; }
+function Card({children,style}) { return <section style={{background:THEME.card,border:`1px solid ${THEME.border}`,borderRadius:18,boxShadow:THEME.shadow,...style}}>{children}</section>; }
+function CardBody({children,style}) { return <div style={{padding:18,...style}}>{children}</div>; }
+function SectionHeader({title,sub,action}) { return <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,padding:"16px 18px",borderBottom:`1px solid ${THEME.border}`}}><div><div style={{fontSize:14,fontWeight:900,color:THEME.text}}>{title}</div>{sub&&<div style={{fontSize:11,color:THEME.muted,marginTop:4}}>{sub}</div>}</div>{action}</div>; }
+function Badge({children,tone="muted"}) { const c=TONE(tone); return <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 8px",borderRadius:999,background:c+"14",border:`1px solid ${c}33`,color:c,fontSize:10,fontWeight:850,whiteSpace:"nowrap"}}>{children}</span>; }
+function StatusBadge({item}) { const s=statusFromItem(item); if(s==="paid") return <Badge tone="income">Pago</Badge>; if(s==="partial") return <Badge tone="warning">Parcial</Badge>; if(s==="overdue") return <Badge tone="expense">Vencido</Badge>; return <Badge>Pendente</Badge>; }
+function FlowStatusBadge({item,isRec}) { const s=statusFromItem(item); if(s==="paid") return <Badge tone="income">{isRec?"Recebido":"Pago"}</Badge>; if(s==="partial") return <Badge tone="warning">Parcial</Badge>; if(s==="overdue") return <Badge tone="expense">{isRec?"Atrasado":"Vencido"}</Badge>; return <Badge>Pendente</Badge>; }
+function Empty({children="Nenhum registro por aqui."}) { return <div style={{padding:"28px 16px",textAlign:"center",color:THEME.subtle,fontSize:12}}>{children}</div>; }
+function Kpi({label,value,sub,tone="accent"}) { const c=TONE(tone); return <Card style={{boxShadow:"none"}}><CardBody><div style={{fontSize:10,textTransform:"uppercase",letterSpacing:.8,color:THEME.muted,fontWeight:850}}>{label}</div><div style={{fontSize:23,fontWeight:950,color:c,marginTop:6,fontVariantNumeric:"tabular-nums"}}>{value}</div><div style={{fontSize:10.5,color:THEME.subtle,marginTop:5}}>{sub}</div></CardBody></Card>; }
+function Modal({title,children,onClose,width=620}) { return <div onMouseDown={onClose} style={{position:"fixed",inset:0,zIndex:100,background:"rgba(2,6,12,.72)",backdropFilter:"blur(6px)",display:"grid",placeItems:"center",padding:16}}><div onMouseDown={e=>e.stopPropagation()} style={{width:"100%",maxWidth:width,maxHeight:"92vh",overflowY:"auto",background:THEME.panel,border:`1px solid ${THEME.border}`,borderRadius:20,boxShadow:"0 30px 100px rgba(0,0,0,.45)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 18px",borderBottom:`1px solid ${THEME.border}`}}><div style={{fontSize:15,fontWeight:900}}>{title}</div><button onClick={onClose} style={{border:0,background:"transparent",color:THEME.muted,fontSize:20,cursor:"pointer"}}>×</button></div><div style={{padding:18}}>{children}</div></div></div>; }
+
+function categoryName(state,idValue) { return state.categories.find(x=>x.id===idValue)?.name || "Sem categoria"; }
+function profileName(state,idValue) { return state.profiles.find(x=>x.id===idValue)?.name || "Perfil"; }
+
+function buildMetrics(state, activeProfileId, ym, viewMode) {
+  const receivables = scopedByView(state.receivables.filter(x=>profileMatch(x,activeProfileId)),ym,viewMode,"dueDate");
+  const bills = scopedByView(state.bills.filter(x=>profileMatch(x,activeProfileId)),ym,viewMode,"dueDate");
+  const scopedCards = state.cards.filter(x=>profileMatch(x,activeProfileId));
+  const scopedDebts = state.debts.filter(x=>profileMatch(x,activeProfileId)&&debtStatus(state,x)!=="archived");
+
+  const received = sum(receivables, paidTotal);
+  const toReceive = sum(receivables, remaining);
+  const billsPaid = sum(bills, paidTotal);
+  const billsOpen = sum(bills, remaining);
+
+  let cardExpected = 0, cardPaid = 0;
+  scopedCards.forEach(card=>{
+    if(viewMode==="month") {
+      cardExpected += cardStatementAmount(state,card.id,ym);
+      cardPaid += cardStatementPaid(state,card.id,ym);
+    } else {
+      const months=[ym,shiftMonth(ym,1)];
+      months.forEach(m=>{
+        const due=statementDueDate(card,m);
+        if(inNext30(due)){ cardExpected += cardStatementAmount(state,card.id,m); cardPaid += cardStatementPaid(state,card.id,m); }
+      });
+    }
+  });
+  const cardOpen=Math.max(0,cardExpected-cardPaid);
+
+  let debtExpected=0, debtPaid=0;
+  scopedDebts.forEach(debt=>{
+    if(viewMode==="month") {
+      debtExpected += debtDueForMonth(state,debt,ym) + sum(debtEventsForMonth(state,debt.id,ym),e=>e.kind==="installment"?e.actualAmount||e.amount:0);
+      debtPaid += sum(debtEventsForMonth(state,debt.id,ym),e=>e.kind==="installment"?e.actualAmount||e.amount:0);
+    } else {
+      debtExpected += debtDueNext30(state,debt);
+      debtPaid += sum(state.debtEvents.filter(e=>e.debtId===debt.id&&inNext30(e.date)&&e.kind==="installment"),e=>e.actualAmount||e.amount);
+    }
+  });
+  const debtOpen=Math.max(0,debtExpected-debtPaid);
+  const paid = billsPaid + cardPaid + debtPaid;
+  const toPay = billsOpen + cardOpen + debtOpen;
+  const resultProjected = received + toReceive - paid - toPay;
+  const accountSum=sum(state.accounts.filter(x=>profileMatch(x,activeProfileId)),x=>x.balance);
+  const balanceCurrent = activeProfileId===PROFILE_ALL
+    ? (state.balanceSnapshot.useAccountSum ? accountSum : num(state.balanceSnapshot.total))
+    : (state.balanceSnapshot.useAccountSum ? accountSum : num(state.balanceSnapshot.total));
+  const balanceProjected = balanceCurrent + toReceive - toPay;
+  return { receivables,bills,received,toReceive,billsPaid,billsOpen,cardExpected,cardPaid,cardOpen,debtExpected,debtPaid,debtOpen,paid,toPay,resultProjected,balanceCurrent,balanceProjected };
+}
+
+function AppLogo() { return <div style={{width:38,height:38,borderRadius:12,display:"grid",placeItems:"center",background:`linear-gradient(145deg,${THEME.accent},${THEME.accent2})`,boxShadow:`0 8px 22px ${THEME.accent}25`,fontWeight:950,color:"white"}}>F</div>; }
+
+const NAV = [
+  ["dashboard","Visão geral","◫"],
+  ["receivables","Recebimentos","↙"],
+  ["bills","Contas a pagar","↗"],
+  ["cards","Cartões","▣"],
+  ["debts","Dívidas e financiamentos","◉"],
+  ["balances","Saldos","▤"],
+  ["goals","Metas","◎"],
+  ["calendar","Calendário","▦"],
+  ["reports","Histórico e relatórios","≡"],
+  ["settings","Configurações","⚙"],
+];
+
+function Sidebar({tab,setTab,open,setOpen,syncStatus,lastSyncedAt,isOnline}) {
+  return <aside className={`sidebar ${open?"open":""}`} style={{background:THEME.panel,borderRight:`1px solid ${THEME.border}`}}>
+    <div style={{display:"flex",alignItems:"center",gap:10,padding:"6px 8px 17px",borderBottom:`1px solid ${THEME.border}`,marginBottom:12}}><AppLogo/><div className="sidebar-copy"><div style={{fontSize:13,fontWeight:950}}>Financeiro</div><div style={{fontSize:10,color:THEME.subtle}}>Pessoal • V7.3</div></div></div>
