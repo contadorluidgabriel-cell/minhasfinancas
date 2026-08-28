@@ -1,7 +1,7 @@
 {
   "name": "minhas-financas",
   "private": true,
-  "version": "7.3.1",
+  "version": "7.3.2",
   "type": "module",
   "scripts": {
     "prepare:app": "node scripts/assemble-app.mjs",
