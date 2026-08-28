@@ -1,0 +1,68 @@
+        <Card><SectionHeader title="Financiamentos" sub="Parcela prevista ≠ saldo devedor bancário" action={<Button ghost onClick={()=>setTab("debts")}>Abrir</Button>}/><CardBody style={{display:"grid",gap:10}}>{state.debts.filter(x=>profileMatch(x,active)&&debtStatus(state,x)==="active").length===0?<Empty>Nenhuma dívida ativa cadastrada.</Empty>:state.debts.filter(x=>profileMatch(x,active)&&debtStatus(state,x)==="active").slice(0,4).map(d=>{const paid=debtPaidInstallments(state,d.id), total=debtSchedule(state,d).length||d.totalInstallments, pct=total?paid/total*100:0;return <div key={d.id}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:6}}><b>{d.name}</b><span style={{color:THEME.muted}}>{paid}/{total||"—"}</span></div><div style={{height:6,borderRadius:99,background:THEME.border,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(100,pct)}%`,background:THEME.accent,borderRadius:99}}/></div></div>})}</CardBody></Card>
+      </div>
+    </div>
+  </div>;
+}
+
+function FlowFilters({state,filters,setFilters,kind}) {
+  const cats=state.categories.filter(c=>c.kind===(kind==="receivable"?"income":"expense")||c.kind==="both");
+  const set=(key,value)=>setFilters(f=>({...f,[key]:value}));
+  return <div className="filter-panel" style={{padding:14,borderBottom:`1px solid ${THEME.border}`,display:"grid",gap:10,background:THEME.card2+"55"}}>
+    <div className="flow-filter-grid">
+      <Field label="Status"><Select value={filters.status} onChange={e=>set("status",e.target.value)}><option value="open">Em aberto</option><option value="pending">Pendente</option><option value="partial">Parcial</option><option value="overdue">Vencido</option><option value="paid">{kind==="receivable"?"Recebido":"Pago"}</option><option value="all">Todos</option></Select></Field>
+      <Field label="Período"><Select value={filters.period} onChange={e=>set("period",e.target.value)}><option value="all">Todos</option><option value="today">Hoje</option><option value="7d">Próximos 7 dias</option><option value="month">Mês atual</option><option value="custom">Personalizado</option></Select></Field>
+      <Field label="Categoria"><Select value={filters.categoryId} onChange={e=>set("categoryId",e.target.value)}><option value="all">Todas</option>{cats.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</Select></Field>
+      <Field label="Perfil"><Select value={filters.profileId} onChange={e=>set("profileId",e.target.value)}><option value="all">Todos</option>{state.profiles.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
+      <Field label="Recorrência"><Select value={filters.recurring} onChange={e=>set("recurring",e.target.value)}><option value="all">Todos</option><option value="yes">Recorrentes</option><option value="no">Não recorrentes</option></Select></Field>
+      <div className="value-range"><Field label="Valor mínimo"><Input value={filters.minValue} onChange={e=>set("minValue",e.target.value)} inputMode="decimal" placeholder="0,00"/></Field><Field label="Valor máximo"><Input value={filters.maxValue} onChange={e=>set("maxValue",e.target.value)} inputMode="decimal" placeholder="Sem limite"/></Field></div>
+    </div>
+    {filters.period==="custom"&&<div className="two-col-form" style={{maxWidth:460}}><Field label="De"><Input type="date" value={filters.from} onChange={e=>set("from",e.target.value)}/></Field><Field label="Até"><Input type="date" value={filters.to} onChange={e=>set("to",e.target.value)}/></Field></div>}
+  </div>;
+}
+
+function FlowPage({state,setState,openModal,activeProfileId,kind}) {
+  const isRec=kind==="receivable";
+  const collection=isRec?"receivables":"bills";
+  const [filters,setFilters]=useState({status:"open",period:"all",categoryId:"all",profileId:"all",recurring:"all",minValue:"",maxValue:"",from:"",to:""});
+  const [selected,setSelected]=useState([]);
+  const activeScoped=state[collection].filter(x=>profileMatch(x,activeProfileId));
+  const items=activeScoped.filter(x=>{
+    const s=statusFromItem(x);
+    if(filters.status==="open"&&s==="paid")return false;
+    if(filters.status!=="all"&&filters.status!=="open"&&s!==filters.status)return false;
+    if(filters.categoryId!=="all"&&x.categoryId!==filters.categoryId)return false;
+    if(filters.profileId!=="all"&&x.profileId!==filters.profileId)return false;
+    if(filters.recurring==="yes"&&!x.recurring)return false;
+    if(filters.recurring==="no"&&x.recurring)return false;
+    const value=num(x.amount); if(filters.minValue!==""&&value<num(filters.minValue))return false; if(filters.maxValue!==""&&value>num(filters.maxValue))return false;
+    if(filters.period==="today"&&x.dueDate!==today())return false;
+    if(filters.period==="7d"){const d=daysDiff(today(),x.dueDate);if(d<0||d>7)return false;}
+    if(filters.period==="month"&&!inMonth(x.dueDate,currentYM()))return false;
+    if(filters.period==="custom"){if(filters.from&&x.dueDate<filters.from)return false;if(filters.to&&x.dueDate>filters.to)return false;}
+    return true;
+  }).sort((a,b)=>String(a.dueDate).localeCompare(String(b.dueDate)));
+  const allSelected=items.length>0&&items.every(x=>selected.includes(x.id));
+  const selectedItems=state[collection].filter(x=>selected.includes(x.id));
+  function fullSettle(item){const value=remaining(item);if(value<=0)return;setState(s=>({...s,[collection]:s[collection].map(x=>x.id===item.id?{...x,payments:[...(x.payments||[]),{id:id("pay"),amount:value,date:today(),method:"",note:""}]}:x)}));}
+  function bulkSettle(){if(!selectedItems.length)return;setState(s=>({...s,[collection]:s[collection].map(x=>selected.includes(x.id)&&remaining(x)>0?{...x,payments:[...(x.payments||[]),{id:id("pay"),amount:remaining(x),date:today(),method:"",note:""}]}:x)}));setSelected([]);}
+  function bulkDelete(){if(!selectedItems.length||!window.confirm(`Excluir definitivamente ${selectedItems.length} registro(s)?`))return;setState(s=>({...s,[collection]:s[collection].filter(x=>!selected.includes(x.id))}));setSelected([]);}
+  function bulkUpdate(key,value){if(!value||value==="none")return;setState(s=>({...s,[collection]:s[collection].map(x=>selected.includes(x.id)?{...x,[key]:value}:x)}));setSelected([]);}
+  function deleteOne(item){if(!window.confirm(`Excluir definitivamente “${item.name}”?`))return;setState(s=>({...s,[collection]:s[collection].filter(x=>x.id!==item.id)}));}
+  return <Card>
+    <SectionHeader title={isRec?"Recebimentos":"Contas a pagar"} sub={isRec?"Lista operacional com filtros, recorrências e baixas":"Lista operacional com filtros, recorrências e vencimentos"} action={<Button tone={isRec?"accent":"warning"} onClick={()=>openModal(isRec?"newReceivable":"newBill")}>+ {isRec?"Novo recebimento":"Nova conta"}</Button>}/>
+    <FlowFilters state={state} filters={filters} setFilters={setFilters} kind={kind}/>
+    {selected.length>0&&<div className="bulk-bar" style={{padding:"10px 14px",borderBottom:`1px solid ${THEME.border}`,display:"flex",gap:8,alignItems:"end",flexWrap:"wrap",background:THEME.accent+"0D"}}><div style={{fontSize:11,fontWeight:900,alignSelf:"center",marginRight:4}}>{selected.length} selecionado(s)</div><Button ghost tone="income" onClick={bulkSettle}>{isRec?"Receber":"Pagar"} selecionados</Button><Button ghost tone="expense" onClick={bulkDelete}>Excluir</Button><Select defaultValue="none" onChange={e=>bulkUpdate("categoryId",e.target.value)} style={{width:170}}><option value="none">Alterar categoria…</option>{state.categories.filter(c=>c.kind===(isRec?"income":"expense")||c.kind==="both").map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</Select><Select defaultValue="none" onChange={e=>bulkUpdate("profileId",e.target.value)} style={{width:160}}><option value="none">Alterar perfil…</option>{state.profiles.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</Select><Button ghost onClick={()=>setSelected([])}>Limpar</Button></div>}
+    <div style={{overflowX:"auto"}}>{items.length===0?<Empty>Nenhum registro com estes filtros.</Empty>:<table className="table flow-table"><thead><tr><th style={{width:32}}><input type="checkbox" checked={allSelected} onChange={e=>setSelected(e.target.checked?items.map(x=>x.id):[])}/></th><th>{isRec?"Origem":"Conta"}</th><th>Valor</th><th>{isRec?"Recebido":"Pago"}</th><th>Pendente</th><th>{isRec?"Data":"Vencimento"}</th><th>Categoria</th><th>Perfil</th><th>Status</th><th>Ações</th></tr></thead><tbody>{items.map(x=>{const s=statusFromItem(x);const isPaid=s==="paid";return <tr key={x.id} className={s==="overdue"?"overdue-row":""}><td><input type="checkbox" checked={selected.includes(x.id)} onChange={e=>setSelected(v=>e.target.checked?[...new Set([...v,x.id])]:v.filter(i=>i!==x.id))}/></td><td><div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}><b>{x.name}</b>{x.recurring&&<Badge tone="accent">Recorrente</Badge>}</div></td><td>{money(x.amount)}</td><td style={{color:THEME.income,fontWeight:800}}>{money(paidTotal(x))}</td><td style={{fontWeight:850}}>{money(remaining(x))}</td><td>{new Date(`${x.dueDate}T12:00:00`).toLocaleDateString("pt-BR")}</td><td>{categoryName(state,x.categoryId)}</td><td>{profileName(state,x.profileId)}</td><td><FlowStatusBadge item={x} isRec={isRec}/></td><td><div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{!isPaid&&<Button tone="income" onClick={()=>fullSettle(x)}>{isRec?"Receber":"Pagar"}</Button>}{!isPaid&&<Button ghost onClick={()=>openModal(isRec?"payReceivable":"payBill",x)}>Parcial</Button>}{isPaid&&x.payments?.length>0&&<Button ghost onClick={()=>openModal("editSettlement",{collection,itemId:x.id,paymentId:x.payments[x.payments.length-1].id,isRec})}>Corrigir baixa</Button>}<Button ghost onClick={()=>openModal("editFlow",{collection,item:x,isRec})}>Editar</Button><Button ghost tone="expense" onClick={()=>deleteOne(x)}>Excluir</Button></div></td></tr>})}</tbody></table>}</div>
+  </Card>;
+}
+
+function ReceivablesPage(props){return <FlowPage {...props} kind="receivable"/>;}
+function BillsPage(props){return <FlowPage {...props} kind="bill"/>;}
+
+function CardsPage({state,setState,openModal,activeProfileId,ym}) {
+  const cards=state.cards.filter(x=>profileMatch(x,activeProfileId));
+  const [selectedCardId,setSelectedCardId]=useState(null);
+  const card=cards.find(c=>c.id===selectedCardId)||null;
+  useEffect(()=>{if(selectedCardId&&!cards.some(c=>c.id===selectedCardId))setSelectedCardId(null)},[selectedCardId,cards.length]);
+  if(!card) return <div style={{display:"grid",gap:14}}>
+    <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}><div><div style={{fontSize:18,fontWeight:950}}>Cartões</div><div style={{fontSize:11,color:THEME.muted,marginTop:3}}>Abra um cartão para ver fatura, compras e próximas faturas em uma única tela.</div></div><div style={{display:"flex",gap:8}}><Button ghost onClick={()=>openModal("newCard")}>+ Cartão</Button><Button tone="cyan" onClick={()=>openModal("newCardPurchase")}>+ Compra</Button></div></div>
