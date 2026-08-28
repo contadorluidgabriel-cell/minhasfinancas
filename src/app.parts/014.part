@@ -1,0 +1,15 @@
+    <div className="shell"><Sidebar tab={tab} setTab={setTab} open={sideOpen} setOpen={setSideOpen} syncStatus={syncStatus} lastSyncedAt={lastSyncedAt} isOnline={isOnline}/><div className="content"><Topbar state={state} setState={setState} tab={tab} ym={ym} setYm={setYm} viewMode={viewMode} setViewMode={setViewMode} setSideOpen={setSideOpen} search={search} setSearch={setSearch} userEmail={session.user.email} onSignOut={signOut} syncStatus={syncStatus} lastSyncedAt={lastSyncedAt} isOnline={isOnline} onRetrySync={retrySync}/><SearchOverlay state={state} term={search} setTerm={setSearch} setTab={setTab}/><main className="main">
+      {tab==="dashboard"&&<Dashboard state={state} metrics={metrics} ym={ym} viewMode={viewMode} openModal={openModal} setTab={setTab}/>} 
+      {tab==="receivables"&&<ReceivablesPage state={state} setState={setState} openModal={openModal} activeProfileId={state.activeProfileId}/>} 
+      {tab==="bills"&&<BillsPage state={state} setState={setState} openModal={openModal} activeProfileId={state.activeProfileId}/>} 
+      {tab==="cards"&&<CardsPage state={state} setState={setState} openModal={openModal} activeProfileId={state.activeProfileId} ym={ym}/>} 
+      {tab==="debts"&&<DebtsPage state={state} setState={setState} openModal={openModal} activeProfileId={state.activeProfileId}/>} 
+      {tab==="balances"&&<BalancesPage state={state} setState={setState} activeProfileId={state.activeProfileId}/>} 
+      {tab==="goals"&&<GoalsPage state={state} openModal={openModal} activeProfileId={state.activeProfileId}/>} 
+      {tab==="calendar"&&<CalendarPage state={state} activeProfileId={state.activeProfileId} ym={ym} setYm={setYm}/>} 
+      {tab==="reports"&&<ReportsPage state={state} activeProfileId={state.activeProfileId} ym={ym}/>} 
+      {tab==="settings"&&<SettingsPage state={state} setState={setState} onBackup={backup} onRestore={restore} userEmail={session.user.email} onSignOut={signOut} syncStatus={syncStatus} lastSyncedAt={lastSyncedAt} isOnline={isOnline} onRetrySync={retrySync}/>} 
+    </main></div></div>
+    <AppModal modal={modal} setModal={setModal} state={state} setState={setState}/>
+  </div>;
+}
