@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const VERSION = 7;
-const APP_VERSION = "7.3.1";
+const APP_VERSION = "7.3.2";
 const STORAGE_KEY = "financeiro-pessoal-v7";
 const PROFILE_ALL = "__all__";
 const MONTHS = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
@@ -14,23 +14,23 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
 });
 
 const THEME = {
-  bg: "#070D16",
-  panel: "#0D1521",
-  card: "#111B2A",
-  card2: "#152235",
-  border: "#22324B",
-  text: "#F7F9FD",
-  muted: "#9AAAC0",
-  subtle: "#65758D",
-  accent: "#5B7CFF",
-  accent2: "#795CFF",
-  income: "#31CE8C",
-  expense: "#FF6877",
-  warning: "#F2B24D",
-  cyan: "#48C4F5",
-  input: "#0A121D",
-  shadow: "0 18px 55px rgba(0,0,0,.24)",
-  softShadow: "0 10px 32px rgba(0,0,0,.18)",
+  bg: "#070C14",
+  panel: "#0B1320",
+  card: "#0F1928",
+  card2: "#132033",
+  border: "#203047",
+  text: "#F6F8FC",
+  muted: "#9AA9BD",
+  subtle: "#64748B",
+  accent: "#5B7FFF",
+  accent2: "#7A63FF",
+  income: "#35D08F",
+  expense: "#FF6675",
+  warning: "#F3B451",
+  cyan: "#4AC5F6",
+  input: "#09121E",
+  shadow: "0 20px 60px rgba(0,0,0,.28)",
+  softShadow: "0 10px 34px rgba(0,0,0,.17)",
 };
 
 const DEFAULT_CATEGORIES = [
