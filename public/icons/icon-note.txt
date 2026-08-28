@@ -1,0 +1,1 @@
+Wallet icon will be stored here for favicon and installable app use.
